@@ -13,6 +13,10 @@ module "eks" {
   create_cloudwatch_log_group = false
   cluster_enabled_log_types   = []
 
+  # Disable KMS key creation
+  create_kms_key            = false
+  cluster_encryption_config = {}
+
   # EKS Managed Node Group(s)
   eks_managed_node_groups = {
     main = {
