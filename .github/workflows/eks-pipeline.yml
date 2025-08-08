@@ -13,50 +13,35 @@ on:
         - apply
         - destroy
 
-env:
-  TF_VERSION: 1.5.7
-  AWS_REGION: us-east-1
-
 jobs:
-  terraform:
-    name: Terraform
+  deploy:
     runs-on: ubuntu-latest
-    environment: production
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v2
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
 
-    - name: Terraform Init
-      run: terraform init
+      - name: Terraform Init
+        run: terraform init -input=false
 
-    - name: Terraform Format
-      continue-on-error: true  # This allows the workflow to continue even if formatting fails
-      run: terraform fmt -check
+      - name: Terraform Validate
+        run: terraform validate
 
-    - name: Terraform Validate
-      run: terraform validate
+      - name: Terraform Plan
+        if: github.event.inputs.action == 'plan'
+        run: terraform plan -input=false
 
-    - name: Terraform Plan
-      if: github.event.inputs.action == 'plan'
-      run: terraform plan -input=false
-
-    - name: Terraform Apply
-      if: github.event.inputs.action == 'apply'
-      run: terraform apply -auto-approve -input=false
-
-    - name: Terraform Destroy
-      if: github.event.inputs.action == 'destroy'
-      run: terraform destroy -auto-approve -input=false
+      - name: Terraform Apply
+        if: github.event.inputs.action == 'apply'
+        run: terraform apply -auto-approve -input=false
