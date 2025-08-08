@@ -20,8 +20,8 @@ module "eks" {
   # Disable OIDC provider creation
   enable_irsa = false
 
-  # Ensure clean destruction
-  create_before_destroy = true
+  # # Ensure clean destruction
+  # create_before_destroy = true
 
   # EKS Managed Node Group(s)
   eks_managed_node_groups = {
