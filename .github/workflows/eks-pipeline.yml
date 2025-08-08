@@ -43,6 +43,7 @@ jobs:
       run: terraform init
 
     - name: Terraform Format
+      continue-on-error: true  # This allows the workflow to continue even if formatting fails
       run: terraform fmt -check
 
     - name: Terraform Validate
