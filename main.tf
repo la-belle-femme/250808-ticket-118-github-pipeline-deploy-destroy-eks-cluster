@@ -13,6 +13,9 @@ module "eks" {
   create_cloudwatch_log_group = false
   cluster_enabled_log_types   = []
 
+  # Add this to disable inline policies
+  iam_role_disable_inline_policies = true
+
   # EKS Managed Node Group(s)
   eks_managed_node_groups = {
     main = {
