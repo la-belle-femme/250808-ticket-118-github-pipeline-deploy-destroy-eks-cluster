@@ -9,6 +9,10 @@ module "eks" {
   subnet_ids                     = var.subnet_ids
   cluster_endpoint_public_access = true
 
+  # Disable CloudWatch logs completely
+  create_cloudwatch_log_group = false
+  cluster_enabled_log_types   = []
+
   # EKS Managed Node Group(s)
   eks_managed_node_groups = {
     main = {
@@ -20,6 +24,7 @@ module "eks" {
       key_name       = var.key_pair_name
       capacity_type  = "ON_DEMAND"
 
+      # Use managed policies only (no inline policies)
       iam_role_additional_policies = {
         AmazonEC2ContainerRegistryReadOnly = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
         AmazonEKSWorkerNodePolicy         = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
@@ -33,22 +38,5 @@ module "eks" {
     }
   }
 
-  cluster_enabled_log_types = var.enabled_cluster_log_types
   tags = var.tags
-}
-
-# Add this new resource after the module block
-resource "aws_iam_role_policy" "cluster_policy" {
-  name   = "eks-cluster-policy"
-  role   = module.eks.cluster_iam_role_name
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action   = ["logs:CreateLogGroup"]
-        Effect   = "Deny"
-        Resource = "*"
-      }
-    ]
-  })
 }
