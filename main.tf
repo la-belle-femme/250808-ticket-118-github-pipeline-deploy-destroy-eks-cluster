@@ -13,9 +13,6 @@ module "eks" {
   create_cloudwatch_log_group = false
   cluster_enabled_log_types   = []
 
-  # Add this to disable inline policies
-  iam_role_disable_inline_policies = true
-
   # EKS Managed Node Group(s)
   eks_managed_node_groups = {
     main = {
@@ -27,12 +24,15 @@ module "eks" {
       key_name       = var.key_pair_name
       capacity_type  = "ON_DEMAND"
 
-      # Use managed policies only (no inline policies)
+      # Use managed policies only
       iam_role_additional_policies = {
         AmazonEC2ContainerRegistryReadOnly = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
         AmazonEKSWorkerNodePolicy         = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
         AmazonEKS_CNI_Policy              = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
       }
+
+      # Explicit role name to avoid conflicts
+      iam_role_name = "eks-node-group-role"
 
       labels = {
         Environment = "dev"
@@ -41,5 +41,14 @@ module "eks" {
     }
   }
 
+  # Explicit cluster IAM role name
+  iam_role_name = "eks-cluster-role"
+
   tags = var.tags
+}
+
+# Attach additional managed policies if needed
+resource "aws_iam_role_policy_attachment" "cluster_additional" {
+  role       = module.eks.cluster_iam_role_name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
