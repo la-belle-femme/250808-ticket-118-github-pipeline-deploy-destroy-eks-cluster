@@ -17,6 +17,9 @@ module "eks" {
   create_kms_key            = false
   cluster_encryption_config = {}
 
+# Disable OIDC provider creation
+  enable_irsa = false 
+
   # EKS Managed Node Group(s)
   eks_managed_node_groups = {
     main = {
