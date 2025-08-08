@@ -11,20 +11,20 @@ module "eks" {
 
   # EKS Managed Node Group(s) - Updated configuration
   eks_managed_node_groups = {
-    main = {  # Changed from 'default' to explicit name
+    main = { # Changed from 'default' to explicit name
       name           = "main-node-group"
       instance_types = var.instance_types
       min_size       = var.min_size
       max_size       = var.max_size
       desired_size   = var.desired_size
       key_name       = var.key_pair_name
-      capacity_type  = "ON_DEMAND"  # Explicitly set capacity type
+      capacity_type  = "ON_DEMAND" # Explicitly set capacity type
 
       # Required IAM policies for nodes
       iam_role_additional_policies = {
         AmazonEC2ContainerRegistryReadOnly = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-        AmazonEKSWorkerNodePolicy         = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-        AmazonEKS_CNI_Policy              = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+        AmazonEKSWorkerNodePolicy          = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+        AmazonEKS_CNI_Policy               = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
       }
 
       # Recommended tags for node group
