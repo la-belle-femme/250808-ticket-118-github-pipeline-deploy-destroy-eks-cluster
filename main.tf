@@ -43,27 +43,15 @@ module "eks" {
 
   iam_role_name = "eks-cluster-role"
   tags          = var.tags
-
-  depends_on = [
-    aws_iam_role_policy_attachment.cluster_additional
-  ]
 }
 
+# Move these resources outside the module's dependency chain
 resource "aws_iam_role_policy_attachment" "cluster_additional" {
   role       = module.eks.cluster_iam_role_name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-resource "time_sleep" "wait_for_nodegroup_deletion" {
-  depends_on = [module.eks]
-  
-  destroy_duration = "15m"
-
-  triggers = {
-    cluster_name = module.eks.cluster_name
-  }
-}
-
+# Create the destroy policy for the node role, not the cluster role
 resource "aws_iam_role_policy" "github_actions_destroy" {
   name = "GitHubActions-EKS-Destroy-Policy"
   role = module.eks.eks_managed_node_groups["main"].iam_role_name
@@ -85,4 +73,17 @@ resource "aws_iam_role_policy" "github_actions_destroy" {
       }
     ]
   })
+}
+
+resource "time_sleep" "wait_for_nodegroup_deletion" {
+  depends_on = [
+    module.eks,
+    aws_iam_role_policy.github_actions_destroy
+  ]
+  
+  destroy_duration = "15m"
+
+  triggers = {
+    cluster_name = module.eks.cluster_name
+  }
 }
