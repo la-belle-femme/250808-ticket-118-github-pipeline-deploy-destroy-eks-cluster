@@ -42,9 +42,8 @@ module "eks" {
   }
 
   iam_role_name = "eks-cluster-role"
-  tags = var.tags
+  tags          = var.tags
 
-  # Explicit dependencies for clean destruction
   depends_on = [
     aws_iam_role_policy_attachment.cluster_additional
   ]
@@ -55,7 +54,6 @@ resource "aws_iam_role_policy_attachment" "cluster_additional" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-# Add this to ensure proper cleanup of node groups
 resource "time_sleep" "wait_for_nodegroup_deletion" {
   depends_on = [module.eks]
   
@@ -64,4 +62,27 @@ resource "time_sleep" "wait_for_nodegroup_deletion" {
   triggers = {
     cluster_name = module.eks.cluster_name
   }
+}
+
+resource "aws_iam_role_policy" "github_actions_destroy" {
+  name = "GitHubActions-EKS-Destroy-Policy"
+  role = module.eks.eks_managed_node_groups["main"].iam_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = [
+          "eks:UpdateNodegroupConfig",
+          "eks:ListNodegroups",
+          "eks:DeleteNodegroup",
+          "eks:DescribeNodegroup",
+          "cloudformation:DescribeStacks",
+          "cloudformation:DeleteStack"
+        ],
+        Resource = "*"
+      }
+    ]
+  })
 }
