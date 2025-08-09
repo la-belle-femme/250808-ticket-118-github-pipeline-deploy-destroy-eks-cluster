@@ -1,34 +1,11 @@
 # github-oidc.tf
 
-# Use data source to reference existing OIDC provider instead of creating new one
+# Data source for existing OIDC provider
 data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 }
 
-data "aws_iam_policy_document" "github_actions_assume_role" {
-  statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-    effect  = "Allow"
-
-    principals {
-      type        = "Federated"
-      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
-    }
-
-    condition {
-      test     = "StringLike"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_org}/${var.github_repo}:*"]
-    }
-    
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-  }
-}
-
+# Import existing IAM role
 resource "aws_iam_role" "github_actions" {
   name               = "GitHubActions-EKS-Role"
   description        = "Role for GitHub Actions to manage EKS"
@@ -36,10 +13,21 @@ resource "aws_iam_role" "github_actions" {
   tags               = var.tags
 }
 
-# Add required EC2 permissions for launch templates
-resource "aws_iam_policy" "eks_ec2_permissions" {
-  name        = "GitHubActionsEKSEc2Permissions"
-  description = "Permissions for GitHub Actions to manage EC2 for EKS"
+# Data source for existing policy
+data "aws_iam_policy" "existing_ec2_permissions" {
+  name = "GitHubActionsEKSEc2Permissions"
+}
+
+# Attach existing policy to role
+resource "aws_iam_role_policy_attachment" "ec2_permissions" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = data.aws_iam_policy.existing_ec2_permissions.arn
+}
+
+# Additional required permissions (if not in existing policy)
+resource "aws_iam_policy" "additional_launch_template_perms" {
+  name        = "GitHubActionsEKSExtraLaunchTemplatePerms"
+  description = "Additional permissions for launch template management"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -47,15 +35,7 @@ resource "aws_iam_policy" "eks_ec2_permissions" {
       {
         Effect = "Allow"
         Action = [
-          "ec2:CreateLaunchTemplate",
-          "ec2:CreateLaunchTemplateVersion",
-          "ec2:DescribeLaunchTemplates",
           "ec2:DescribeLaunchTemplateVersions",
-          "ec2:DeleteLaunchTemplate",
-          "ec2:RunInstances",
-          "ec2:DescribeSubnets",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeImages",
           "ec2:DescribeInstanceTypes"
         ]
         Resource = "*"
@@ -64,12 +44,12 @@ resource "aws_iam_policy" "eks_ec2_permissions" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "ec2_permissions" {
+resource "aws_iam_role_policy_attachment" "additional_perms" {
   role       = aws_iam_role.github_actions.name
-  policy_arn = aws_iam_policy.eks_ec2_permissions.arn
+  policy_arn = aws_iam_policy.additional_launch_template_perms.arn
 }
 
-# Attach standard EKS policies
+# Standard EKS policies
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   role       = aws_iam_role.github_actions.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
@@ -78,9 +58,4 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
 resource "aws_iam_role_policy_attachment" "eks_service_policy" {
   role       = aws_iam_role.github_actions.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSServicePolicy"
-}
-
-output "github_actions_role_arn" {
-  description = "ARN of the GitHub Actions IAM role"
-  value       = aws_iam_role.github_actions.arn
 }
