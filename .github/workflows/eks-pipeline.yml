@@ -56,64 +56,42 @@ jobs:
 
       - name: Destroy EKS Cluster
         if: github.event.inputs.action == 'destroy'
-        timeout-minutes: 45  # Fixed timeout as number, not variable
+        timeout-minutes: 45
         run: |
           #!/bin/bash
           set -eo pipefail
 
-          function cleanup_resources() {
-            echo "::group::1. Deleting Node Groups"
-            nodegroups=$(aws eks list-nodegroups \
-              --cluster-name "$CLUSTER_NAME" \
-              --region "$AWS_REGION" \
-              --query "nodegroups" \
-              --output text || echo "")
+          # Verify AWS permissions
+          function verify_permissions() {
+            echo "::group::Verifying IAM Permissions"
+            aws eks describe-cluster \
+              --name "$CLUSTER_NAME" \
+              --region "$AWS_REGION" || {
+                echo "::error::Failed to describe cluster - check IAM permissions"
+                exit 1
+              }
+            echo "::endgroup::"
+          }
+
+          # Force delete all cluster resources
+          function force_delete_cluster() {
+            echo "::group::1. Forcing Cluster Deletion"
+            aws eks delete-cluster \
+              --name "$CLUSTER_NAME" \
+              --region "$AWS_REGION" || true
             
-            if [ -n "$nodegroups" ]; then
-              for ng in $nodegroups; do
-                echo "Scaling down nodegroup: $ng"
-                aws eks update-nodegroup-config \
-                  --cluster-name "$CLUSTER_NAME" \
-                  --nodegroup-name "$ng" \
-                  --region "$AWS_REGION" \
-                  --scaling-config minSize=0,maxSize=0,desiredSize=0 || true
-                
-                echo "Deleting nodegroup: $ng"
-                aws eks delete-nodegroup \
-                  --cluster-name "$CLUSTER_NAME" \
-                  --nodegroup-name "$ng" \
-                  --region "$AWS_REGION" || true
-                
-                echo "Waiting for deletion (max 10 minutes)..."
-                timeout 600 aws eks wait nodegroup-deleted \
-                  --cluster-name "$CLUSTER_NAME" \
-                  --nodegroup-name "$ng" \
-                  --region "$AWS_REGION" || true
-              done
-            fi
+            echo "Waiting for cluster deletion (max 15 minutes)..."
+            timeout 900 aws eks wait cluster-deleted \
+              --name "$CLUSTER_NAME" \
+              --region "$AWS_REGION" || true
             echo "::endgroup::"
+          }
 
-            echo "::group::2. Deleting Fargate Profiles"
-            profiles=$(aws eks list-fargate-profiles \
-              --cluster-name "$CLUSTER_NAME" \
-              --region "$AWS_REGION" \
-              --query "fargateProfileNames" \
-              --output text || echo "")
+          # Cleanup remaining resources
+          function cleanup_orphans() {
+            echo "::group::2. Cleaning Orphaned Resources"
             
-            for profile in $profiles; do
-              aws eks delete-fargate-profile \
-                --cluster-name "$CLUSTER_NAME" \
-                --fargate-profile-name "$profile" \
-                --region "$AWS_REGION" || true
-            done
-            echo "::endgroup::"
-
-            echo "::group::3. Running Terraform Destroy"
-            terraform destroy -auto-approve -input=false -refresh=false
-            echo "::endgroup::"
-
-            echo "::group::4. Cleaning Orphaned Resources"
-            # Cleanup CloudFormation stacks
+            # CloudFormation stacks
             stacks=$(aws cloudformation list-stacks \
               --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
               --query "StackSummaries[?contains(StackName, '$CLUSTER_NAME')].StackName" \
@@ -125,7 +103,7 @@ jobs:
                 --region "$AWS_REGION" || true
             done
 
-            # Cleanup Load Balancers
+            # Load Balancers
             lbs=$(aws elbv2 describe-load-balancers \
               --query "LoadBalancers[?contains(LoadBalancerName, '$CLUSTER_NAME')].LoadBalancerArn" \
               --output text --region "$AWS_REGION" 2>/dev/null || echo "")
@@ -139,16 +117,16 @@ jobs:
           }
 
           # Main execution
-          if ! aws eks describe-cluster \
-            --name "$CLUSTER_NAME" \
-            --region "$AWS_REGION" &>/dev/null; then
-            echo "::warning::Cluster $CLUSTER_NAME not found"
-            exit 0
-          fi
+          verify_permissions
 
-          cleanup_resources
+          echo "::group::Running Terraform Destroy"
+          terraform destroy -auto-approve -input=false -refresh=false
+          echo "::endgroup::"
 
-          echo "::group::5. Final Verification"
+          force_delete_cluster
+          cleanup_orphans
+
+          echo "::group::Final Verification"
           if aws eks describe-cluster \
             --name "$CLUSTER_NAME" \
             --region "$AWS_REGION" &>/dev/null; then
