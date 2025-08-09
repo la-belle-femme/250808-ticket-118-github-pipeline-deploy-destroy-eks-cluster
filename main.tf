@@ -43,15 +43,39 @@ module "eks" {
 
   iam_role_name = "eks-cluster-role"
   tags          = var.tags
+
+  # Security group additional rules
+  cluster_security_group_additional_rules = {
+    egress_all = {
+      description      = "Allow all egress"
+      protocol        = "-1"
+      from_port       = 0
+      to_port         = 0
+      type            = "egress"
+      cidr_blocks     = ["0.0.0.0/0"]
+      ipv6_cidr_blocks = ["::/0"]
+    }
+  }
+
+  node_security_group_additional_rules = {
+    egress_all = {
+      description      = "Allow all egress"
+      protocol        = "-1"
+      from_port       = 0
+      to_port         = 0
+      type            = "egress"
+      cidr_blocks     = ["0.0.0.0/0"]
+      ipv6_cidr_blocks = ["::/0"]
+    }
+  }
 }
 
-# Move these resources outside the module's dependency chain
+# IAM Policy Attachments
 resource "aws_iam_role_policy_attachment" "cluster_additional" {
   role       = module.eks.cluster_iam_role_name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-# Create the destroy policy for the node role, not the cluster role
 resource "aws_iam_role_policy" "github_actions_destroy" {
   name = "GitHubActions-EKS-Destroy-Policy"
   role = module.eks.eks_managed_node_groups["main"].iam_role_name
