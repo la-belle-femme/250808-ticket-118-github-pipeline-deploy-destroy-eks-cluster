@@ -20,9 +20,6 @@ module "eks" {
   # Disable OIDC provider creation
   enable_irsa = false
 
-  # # Ensure clean destruction
-  # create_before_destroy = true
-
   # EKS Managed Node Group(s)
   eks_managed_node_groups = {
     main = {
@@ -55,10 +52,34 @@ module "eks" {
   iam_role_name = "eks-cluster-role"
 
   tags = var.tags
+
+  depends_on = [null_resource.nodegroup_cleanup]
 }
 
 # Attach additional managed policies if needed
 resource "aws_iam_role_policy_attachment" "cluster_additional" {
   role       = module.eks.cluster_iam_role_name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "null_resource" "nodegroup_cleanup" {
+  triggers = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<EOT
+      aws eks list-nodegroups \
+        --cluster-name ${module.eks.cluster_name} \
+        --region ${var.aws_region} \
+        --query "nodegroups" \
+        --output text | xargs -I {} \
+        aws eks delete-nodegroup \
+        --cluster-name ${module.eks.cluster_name} \
+        --nodegroup-name {} \
+        --region ${var.aws_region} || true
+      sleep 180
+    EOT
+  }
 }
