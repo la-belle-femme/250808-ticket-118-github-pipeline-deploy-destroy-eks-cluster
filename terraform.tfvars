@@ -11,3 +11,7 @@ max_size                  = 3
 key_pair_name             = "terraform-offert-letter-key"
 enabled_cluster_log_types = ["api", "audit"]
 tags                      = {}
+
+# Add these new variables
+github_org  = "la-belle-femme"       # Your GitHub username/organization
+github_repo = "250808-ticket-118-github-pipeline-deploy-destroy-eks-cluster"  # Your repository name
