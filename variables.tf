@@ -57,9 +57,27 @@ variable "enabled_cluster_log_types" {
   type        = list(string)
   default     = ["api", "audit"]
 }
+# variables.tf
+variable "enable_github_oidc" {
+  description = "Whether to enable GitHub OIDC provider"
+  type        = bool
+  default     = true
+}
+
+variable "github_org" {
+  description = "GitHub organization name"
+  type        = string
+}
+
+variable "github_repo" {
+  description = "GitHub repository name"
+  type        = string
+}
 
 variable "tags" {
-  description = "Tags to apply to all resources"
+  description = "Tags to apply to resources"
   type        = map(string)
   default     = {}
 }
+
+
