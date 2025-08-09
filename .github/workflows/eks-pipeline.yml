@@ -14,15 +14,15 @@ on:
           - destroy
 
 env:
-  CLUSTER_NAME: your-cluster-name  # Set this in GitHub secrets/variables
-  AWS_REGION: us-east-1            # Set this in GitHub secrets/variables
+  CLUSTER_NAME: github-action-eks-cluster
+  AWS_REGION: us-east-1
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # Required for OIDC
-      contents: read   # Required for checkout
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout code
@@ -39,6 +39,7 @@ jobs:
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.5.7
+          terraform_wrapper: false
 
       - name: Terraform Init
         run: terraform init -input=false
@@ -56,53 +57,63 @@ jobs:
 
       - name: Terraform Destroy
         if: github.event.inputs.action == 'destroy'
-        timeout-minutes: 30  # Allow extra time for cleanup
+        timeout-minutes: 60
         run: |
-          set -e  # Exit immediately on errors
+          set -e
+          set -o pipefail
 
-          # Verify cluster exists before deletion
-          if ! aws eks describe-cluster \
-            --name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }} &>/dev/null; then
-            echo "Cluster not found - nothing to destroy"
+          # Verify AWS credentials
+          aws sts get-caller-identity
+
+          # Check if cluster exists
+          if ! aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} &>/dev/null; then
+            echo "::warning::Cluster ${{ env.CLUSTER_NAME }} not found"
             exit 0
           fi
 
-          # Delete nodegroups
-          NODEGROUPS=$(aws eks list-nodegroups \
-            --cluster-name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query "nodegroups" \
-            --output text || echo "")
-          
-          if [ -n "$NODEGROUPS" ]; then
-            echo "Found nodegroups: $NODEGROUPS"
-            for NODEGROUP in $NODEGROUPS; do
-              echo "Deleting nodegroup $NODEGROUP..."
-              aws eks delete-nodegroup \
-                --cluster-name ${{ env.CLUSTER_NAME }} \
-                --nodegroup-name $NODEGROUP \
-                --region ${{ env.AWS_REGION }} || true
-            done
-            
-            echo "Waiting for nodegroups to delete (max 15 minutes)..."
-            for NODEGROUP in $NODEGROUPS; do
-              aws eks wait nodegroup-deleted \
-                --cluster-name ${{ env.CLUSTER_NAME }} \
-                --nodegroup-name $NODEGROUP \
-                --region ${{ env.AWS_REGION }} || true
-            done
-          fi
-          
-          # Destroy Terraform infrastructure
-          terraform destroy -auto-approve -input=false
+          echo "=== Starting destruction sequence ==="
 
-          # Final verification
-          if aws eks describe-cluster \
-            --name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }} &>/dev/null; then
+          # 1. Scale down node groups to zero
+          echo "::group::Scaling down node groups"
+          nodegroups=$(aws eks list-nodegroups --cluster-name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query "nodegroups" --output text || echo "")
+          for ng in $nodegroups; do
+            aws eks update-nodegroup-config \
+              --cluster-name ${{ env.CUSTER_NAME }} \
+              --nodegroup-name $ng \
+              --region ${{ env.AWS_REGION }} \
+              --scaling-config minSize=0,maxSize=0,desiredSize=0 || true
+          done
+          echo "::endgroup::"
+
+          # 2. Delete node groups
+          echo "::group::Deleting node groups"
+          for ng in $nodegroups; do
+            aws eks delete-nodegroup \
+              --cluster-name ${{ env.CLUSTER_NAME }} \
+              --nodegroup-name $ng \
+              --region ${{ env.AWS_REGION }} || true
+          done
+          
+          # Wait for node group deletion
+          for ng in $nodegroups; do
+            timeout 900 aws eks wait nodegroup-deleted \
+              --cluster-name ${{ env.CLUSTER_NAME }} \
+              --nodegroup-name $ng \
+              --region ${{ env.AWS_REGION }} || true
+          done
+          echo "::endgroup::"
+
+          # 3. Run Terraform destroy
+          echo "::group::Executing terraform destroy"
+          terraform destroy -auto-approve -input=false -refresh=false
+          echo "::endgroup::"
+
+          # 4. Final verification
+          echo "::group::Verifying destruction"
+          if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} &>/dev/null; then
             echo "::error::Cluster still exists after destroy!"
             exit 1
           else
             echo "Cluster successfully destroyed"
           fi
+          echo "::endgroup::"
