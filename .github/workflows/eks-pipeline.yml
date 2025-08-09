@@ -13,6 +13,9 @@ on:
           - apply
           - destroy
 
+env:
+  CLUSTER_NAME: your-cluster-name  # or set this in GitHub secrets/variables
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -50,23 +53,42 @@ jobs:
         if: github.event.inputs.action == 'destroy'
         run: |
           # First delete nodegroups explicitly
-          aws eks list-nodegroups \
-            --cluster-name ${{ vars.cluster_name }} \
+          NODEGROUPS=$(aws eks list-nodegroups \
+            --cluster-name ${{ env.CLUSTER_NAME }} \
             --region ${{ secrets.AWS_REGION }} \
             --query "nodegroups" \
-            --output text | xargs -I {} \
-            aws eks delete-nodegroup \
-            --cluster-name ${{ vars.cluster_name }} \
-            --nodegroup-name {} \
-            --region ${{ secrets.AWS_REGION }} || true
+            --output text)
           
-          echo "Waiting 3 minutes for nodegroups to delete..."
-          sleep 180
+          if [ -n "$NODEGROUPS" ]; then
+            echo "Found nodegroups: $NODEGROUPS"
+            for NODEGROUP in $NODEGROUPS; do
+              echo "Deleting nodegroup $NODEGROUP..."
+              aws eks delete-nodegroup \
+                --cluster-name ${{ env.CLUSTER_NAME }} \
+                --nodegroup-name $NODEGROUP \
+                --region ${{ secrets.AWS_REGION }} || true
+            done
+            
+            echo "Waiting for nodegroups to delete..."
+            for NODEGROUP in $NODEGROUPS; do
+              aws eks wait nodegroup-deleted \
+                --cluster-name ${{ env.CLUSTER_NAME }} \
+                --nodegroup-name $NODEGROUP \
+                --region ${{ secrets.AWS_REGION }} || true
+            done
+          else
+            echo "No nodegroups found"
+          fi
           
           # Now run terraform destroy
           terraform destroy -auto-approve -input=false
           
-          # Final cleanup verification
-          aws eks list-clusters --region ${{ secrets.AWS_REGION }} | \
-            grep -q ${{ vars.cluster_name }} || \
+          # Final verification
+          if aws eks describe-cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ secrets.AWS_REGION }} &>/dev/null; then
+            echo "Cluster still exists!"
+            exit 1
+          else
             echo "Cluster successfully destroyed"
+          fi
