@@ -9,9 +9,9 @@ on:
         default: 'plan'
         type: choice
         options:
-        - plan
-        - apply
-        - destroy
+          - plan
+          - apply
+          - destroy
 
 jobs:
   deploy:
@@ -45,3 +45,28 @@ jobs:
       - name: Terraform Apply
         if: github.event.inputs.action == 'apply'
         run: terraform apply -auto-approve -input=false
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          # First delete nodegroups explicitly
+          aws eks list-nodegroups \
+            --cluster-name ${{ vars.cluster_name }} \
+            --region ${{ secrets.AWS_REGION }} \
+            --query "nodegroups" \
+            --output text | xargs -I {} \
+            aws eks delete-nodegroup \
+            --cluster-name ${{ vars.cluster_name }} \
+            --nodegroup-name {} \
+            --region ${{ secrets.AWS_REGION }} || true
+          
+          echo "Waiting 3 minutes for nodegroups to delete..."
+          sleep 180
+          
+          # Now run terraform destroy
+          terraform destroy -auto-approve -input=false
+          
+          # Final cleanup verification
+          aws eks list-clusters --region ${{ secrets.AWS_REGION }} | \
+            grep -q ${{ vars.cluster_name }} || \
+            echo "Cluster successfully destroyed"
