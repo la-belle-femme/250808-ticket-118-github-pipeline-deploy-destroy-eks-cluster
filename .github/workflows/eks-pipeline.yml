@@ -56,77 +56,93 @@ jobs:
 
       - name: Destroy EKS Cluster
         if: github.event.inputs.action == 'destroy'
-        timeout-minutes: 45
+        timeout-minutes: 60
         run: |
           #!/bin/bash
           set -eo pipefail
 
-          # Verify AWS permissions
-          function verify_permissions() {
-            echo "::group::Verifying IAM Permissions"
-            aws eks describe-cluster \
-              --name "$CLUSTER_NAME" \
-              --region "$AWS_REGION" || {
-                echo "::error::Failed to describe cluster - check IAM permissions"
-                exit 1
-              }
-            echo "::endgroup::"
-          }
+          # Verify cluster exists
+          if ! aws eks describe-cluster \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION" &>/dev/null; then
+            echo "::warning::Cluster $CLUSTER_NAME not found - nothing to destroy"
+            exit 0
+          fi
 
-          # Force delete all cluster resources
-          function force_delete_cluster() {
-            echo "::group::1. Forcing Cluster Deletion"
-            aws eks delete-cluster \
-              --name "$CLUSTER_NAME" \
-              --region "$AWS_REGION" || true
-            
-            echo "Waiting for cluster deletion (max 15 minutes)..."
-            timeout 900 aws eks wait cluster-deleted \
-              --name "$CLUSTER_NAME" \
-              --region "$AWS_REGION" || true
-            echo "::endgroup::"
-          }
+          echo "=== Starting destruction sequence ==="
 
-          # Cleanup remaining resources
-          function cleanup_orphans() {
-            echo "::group::2. Cleaning Orphaned Resources"
-            
-            # CloudFormation stacks
-            stacks=$(aws cloudformation list-stacks \
-              --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
-              --query "StackSummaries[?contains(StackName, '$CLUSTER_NAME')].StackName" \
-              --output text --region "$AWS_REGION" 2>/dev/null || echo "")
-            
-            for stack in $stacks; do
-              aws cloudformation delete-stack \
-                --stack-name "$stack" \
-                --region "$AWS_REGION" || true
-            done
-
-            # Load Balancers
-            lbs=$(aws elbv2 describe-load-balancers \
-              --query "LoadBalancers[?contains(LoadBalancerName, '$CLUSTER_NAME')].LoadBalancerArn" \
-              --output text --region "$AWS_REGION" 2>/dev/null || echo "")
-            
-            for lb in $lbs; do
-              aws elbv2 delete-load-balancer \
-                --load-balancer-arn "$lb" \
-                --region "$AWS_REGION" || true
-            done
-            echo "::endgroup::"
-          }
-
-          # Main execution
-          verify_permissions
-
-          echo "::group::Running Terraform Destroy"
-          terraform destroy -auto-approve -input=false -refresh=false
+          # 1. First try Terraform destroy
+          echo "::group::1. Running Terraform Destroy"
+          terraform destroy -auto-approve -input=false -refresh=false || true
           echo "::endgroup::"
 
-          force_delete_cluster
-          cleanup_orphans
+          # 2. Manual cleanup if Terraform didn't complete
+          echo "::group::2. Manual Cleanup"
+          
+          # Delete node groups if they exist
+          nodegroups=$(aws eks list-nodegroups \
+            --cluster-name "$CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --query "nodegroups" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$nodegroups" ]; then
+            for ng in $nodegroups; do
+              echo "Deleting nodegroup: $ng"
+              aws eks delete-nodegroup \
+                --cluster-name "$CLUSTER_NAME" \
+                --nodegroup-name "$ng" \
+                --region "$AWS_REGION" || true
+              
+              echo "Waiting for deletion..."
+              timeout 600 aws eks wait nodegroup-deleted \
+                --cluster-name "$CLUSTER_NAME" \
+                --nodegroup-name "$ng" \
+                --region "$AWS_REGION" || true
+            done
+          fi
 
-          echo "::group::Final Verification"
+          # Delete the cluster directly
+          echo "Deleting cluster: $CLUSTER_NAME"
+          aws eks delete-cluster \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION" || true
+            
+          echo "Waiting for cluster deletion..."
+          timeout 1200 aws eks wait cluster-deleted \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION" || true
+          echo "::endgroup::"
+
+          # 3. Cleanup orphaned resources
+          echo "::group::3. Cleaning Orphaned Resources"
+          
+          # CloudFormation stacks
+          stacks=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query "StackSummaries[?contains(StackName, '$CLUSTER_NAME')].StackName" \
+            --output text --region "$AWS_REGION" 2>/dev/null || echo "")
+          
+          for stack in $stacks; do
+            aws cloudformation delete-stack \
+              --stack-name "$stack" \
+              --region "$AWS_REGION" || true
+          done
+
+          # Load Balancers
+          lbs=$(aws elbv2 describe-load-balancers \
+            --query "LoadBalancers[?contains(LoadBalancerName, '$CLUSTER_NAME')].LoadBalancerArn" \
+            --output text --region "$AWS_REGION" 2>/dev/null || echo "")
+          
+          for lb in $lbs; do
+            aws elbv2 delete-load-balancer \
+              --load-balancer-arn "$lb" \
+              --region "$AWS_REGION" || true
+          done
+          echo "::endgroup::"
+
+          # 4. Final verification
+          echo "::group::4. Final Verification"
           if aws eks describe-cluster \
             --name "$CLUSTER_NAME" \
             --region "$AWS_REGION" &>/dev/null; then
