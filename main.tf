@@ -52,8 +52,6 @@ module "eks" {
   iam_role_name = "eks-cluster-role"
 
   tags = var.tags
-
-  depends_on = [null_resource.nodegroup_cleanup]
 }
 
 # Attach additional managed policies if needed
@@ -64,21 +62,22 @@ resource "aws_iam_role_policy_attachment" "cluster_additional" {
 
 resource "null_resource" "nodegroup_cleanup" {
   triggers = {
-    always_run = timestamp()
+    cluster_name = var.cluster_name
+    aws_region   = var.aws_region
   }
 
   provisioner "local-exec" {
     when    = destroy
     command = <<EOT
       aws eks list-nodegroups \
-        --cluster-name ${module.eks.cluster_name} \
-        --region ${var.aws_region} \
+        --cluster-name ${self.triggers.cluster_name} \
+        --region ${self.triggers.aws_region} \
         --query "nodegroups" \
         --output text | xargs -I {} \
         aws eks delete-nodegroup \
-        --cluster-name ${module.eks.cluster_name} \
+        --cluster-name ${self.triggers.cluster_name} \
         --nodegroup-name {} \
-        --region ${var.aws_region} || true
+        --region ${self.triggers.aws_region} || true
       sleep 180
     EOT
   }
